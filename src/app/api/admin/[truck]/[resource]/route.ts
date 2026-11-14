@@ -8,6 +8,7 @@ import { cancelOrder, hydrateOrders } from "@/lib/server/logic";
 import { createStaff, deleteStaff, listStaff, updateStaff } from "@/lib/server/admin-staff";
 import { addDays, bhParts, startOfDay } from "@/lib/time";
 import type { Ingredient, OrderLine, Permission } from "@/lib/types";
+
 export const dynamic = "force-dynamic";
 type Ctx = { params: Promise<{ truck: string; resource: string }> };
 type Method = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
@@ -42,7 +43,8 @@ const CRUD = {
   regions: { table: regions, order: [regions.nameEn], fields: { nameEn: "s", nameAr: "s", fee: "n", active: "b" } },
   coupons: { table: coupons, order: [desc(coupons.id)], fields: { code: "s", type: "s", value: "n", minOrder: "n", startsOn: "ns", endsOn: "ns", maxUses: "nn", active: "b" } },
   banners: { table: banners, order: [desc(banners.id)], fields: { kind: "s", titleEn: "s", titleAr: "s", bodyEn: "s", bodyAr: "s", imageUrl: "s", startsOn: "ns", endsOn: "ns", active: "b" } },
-drivers: { table: drivers, order: [drivers.id], fields: { name: "s", phone: "s", defaultCommission: "n", commissionType: "s", active: "b" } },} as unknown as Record<string, { table: typeof items; order: never[]; fields: Record<string, FT> }>;
+  drivers: { table: drivers, order: [drivers.id], fields: { name: "s", phone: "s", defaultCommission: "n", commissionType: "s", active: "b" } },
+} as unknown as Record<string, { table: typeof items; order: never[]; fields: Record<string, FT> }>;
 
 function coerce(t: FT, v: unknown): unknown {
   switch (t) {
@@ -196,7 +198,9 @@ async function handle(method: Method, req: Request, ctx: Ctx): Promise<Response>
             const [d] = await db.select().from(drivers).where(and(eq(drivers.id, did), eq(drivers.truckId, t.id))).limit(1);
             if (!d) throw new ApiError("invalid_input");
             patch.driverId = d.id;
-            if (o.driverId !== d.id && !("driverCommission" in body)) patch.driverCommission = d.defaultCommission;
+            if (o.driverId !== d.id && !("driverCommission" in body)) {
+              patch.driverCommission = d.commissionType === "matching" ? o.deliveryFee : d.defaultCommission;
+            }
           }
         }
         if ("driverCommission" in body && patch.driverId !== null) {
@@ -273,7 +277,7 @@ async function handle(method: Method, req: Request, ctx: Ctx): Promise<Response>
         const rows = await db.select().from(payouts).where(eq(payouts.truckId, t.id)).orderBy(desc(payouts.id)).limit(50);
         const drvs = await db.select().from(drivers).where(eq(drivers.truckId, t.id));
         const dm = new Map(drvs.map((d) => [d.id, d.name]));
-        return ok({ rows: rows.map((p) => ({ ...p, paidAt: p.paidAt.toISOString(), driverName: dm.get(p.driverId) ?? "" })) });
+        return ok({ rows: rows.map((p) => ({ ...p, paidAt: p.paidAt ? new Date(p.paidAt).toISOString() : new Date().toISOString(), driverName: dm.get(p.driverId) ?? "" })) });
       }
       if (method === "POST") {
         const driverId = num(body.driverId);
@@ -292,7 +296,7 @@ async function handle(method: Method, req: Request, ctx: Ctx): Promise<Response>
           await tx.update(orders).set({ driverPaid: true, payoutId: p.id }).where(inArray(orders.id, rows.map((r) => r.id)));
           return p;
         });
-        return ok({ payout: { ...payout, paidAt: payout.paidAt.toISOString() } });
+        return ok({ payout: { ...payout, paidAt: payout.paidAt ? new Date(payout.paidAt).toISOString() : new Date().toISOString() } });
       }
       break;
     }
