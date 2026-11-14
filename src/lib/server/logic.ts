@@ -348,6 +348,8 @@ export type NewOrder = {
   guest?: { name: string; phone: string; email: string };
   fulfillment: Fulfillment;
   address: string;
+  lat?: number | null;
+  lng?: number | null;
   priced: Priced;
   slotLabel: string;
   paymentMethod: PayMethod;
@@ -373,6 +375,8 @@ export async function createOrder(p: NewOrder): Promise<OrderRow> {
         guestEmail: p.guest?.email || null,
         fulfillment: p.fulfillment,
         address: p.address,
+        lat: p.lat ?? null,
+        lng: p.lng ?? null,
         regionId: pr.regionId,
         regionName: pr.regionName,
         deliveryFee: pr.deliveryFee,
@@ -515,6 +519,8 @@ export async function hydrateOrders(rows: OrderRow[], s: PublicSettings, opts: {
       customerPhone: o.guestPhone ?? c?.phone ?? null,
       fulfillment: o.fulfillment as Fulfillment,
       address: o.address,
+      lat: o.lat,
+      lng: o.lng,
       regionName: o.regionName,
       deliveryFee: o.deliveryFee,
       deliverySlot: o.deliverySlot,

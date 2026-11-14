@@ -7,6 +7,7 @@ import {
   timestamp,
   jsonb,
   numeric,
+  real,
   primaryKey,
   index,
 } from "drizzle-orm/pg-core";
@@ -185,6 +186,7 @@ export const drivers = pgTable("drivers", {
   name: text("name").notNull(),
   phone: text("phone").notNull().default(""),
   defaultCommission: money("default_commission").notNull().default(0),
+  commissionType: text("commission_type").notNull().default("fixed"),
   active: boolean("active").notNull().default(true),
 });
 
@@ -242,9 +244,11 @@ export const orders = pgTable(
     paymentStatus: text("payment_status").notNull().default("pending"), // pending | paid | failed
     paymentRef: text("payment_ref").notNull().default(""),
     status: text("status").notNull().default("NOT_READY"), // NOT_READY | COMPLETED | CANCELLED
-    deliveryState: text("delivery_state").notNull().default("pending"), // pending | out | delivered
-    driverId: integer("driver_id"),
+    deliveryState: text("delivery_state").notNull().default("pending"),
+    driverId: integer("driver_id"), // <-- هذا هو الحقل المفقود الذي كان يسبب الخطأ
     driverCommission: money("driver_commission").notNull().default(0),
+    lat: real("lat"), // <-- خط عرض الموقع الجغرافي
+  lng: real("lng"), // <-- خط طول الموقع الجغرافي
     driverPaid: boolean("driver_paid").notNull().default(false),
     payoutId: integer("payout_id"),
     scheduledFor: timestamp("scheduled_for", { withTimezone: true }),

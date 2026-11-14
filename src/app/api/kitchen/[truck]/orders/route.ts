@@ -1,6 +1,6 @@
 import { and, desc, eq, gte, lte, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { orders } from "@/db/schema";
+import { orders, drivers } from "@/db/schema";
 import { canDo, getStaff } from "@/lib/server/auth";
 import { getSettings, getTruck } from "@/lib/server/config";
 import { ApiError, num, ok, readBody, route } from "@/lib/server/http";
@@ -58,11 +58,39 @@ export const GET = route(async (req: Request, ctx: Ctx) => {
 export const POST = route(async (req: Request, ctx: Ctx) => {
   const t = await authorize(ctx);
   const b = await readBody(req);
+  const driverId = b.driverId ? Number(b.driverId) : null;
+  const orderId = num(b.orderId);
+
+  // جلب الطلب لمعرفة رسوم التوصيل للمنطقة في حال كانت العمولة تعتمد على المنطقة
+  const [targetOrder] = await db.select().from(orders).where(eq(orders.id, orderId));
+
+  // جلب بيانات السائق وطريقة احتساب العمولة الخاصة به (ثابت أو حسب المنطقة)
+  let driverCommission = 0;
+  if (driverId) {
+    const [drv] = await db.select().from(drivers).where(eq(drivers.id, driverId));
+    if (drv) {
+      if (drv.commissionType === "region" && targetOrder) {
+        // العمولة تصبح مساوية لرسوم التوصيل الخاصة بالمنطقة للطلب
+        driverCommission = Number(targetOrder.deliveryFee) || 0;
+      } else {
+        // العمولة مبلغ ثابت كما حدده المدير
+        driverCommission = Number(drv.defaultCommission) || 0;
+      }
+    }
+  }
+
   const [row] = await db
     .update(orders)
-    .set({ status: "COMPLETED", completedAt: new Date() })
-    .where(and(eq(orders.id, num(b.orderId)), eq(orders.truckId, t.id), eq(orders.status, "NOT_READY")))
+    .set({ 
+      status: "COMPLETED", 
+      completedAt: new Date(),
+      driverId: driverId,
+      deliveryState: "delivered",     // ضروري جداً لكي يعتمدها تقرير السائقين
+      driverCommission: driverCommission // تسجيل العمولة المحسوبة للطلب
+    })
+    .where(and(eq(orders.id, orderId), eq(orders.truckId, t.id), eq(orders.status, "NOT_READY")))
     .returning({ id: orders.id });
+    
   if (!row) throw new ApiError("completed_locked", 409);
   return ok();
 });

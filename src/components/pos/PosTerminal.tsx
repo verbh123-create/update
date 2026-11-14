@@ -4,11 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/client";
 import { fmtDateTime, fmtMoney } from "@/lib/time";
 import type { OrderView } from "@/lib/types";
-import { Img, LogoutButton, toast } from "@/components/ui";
+import { Img, LogoutButton, Stepper, toast } from "@/components/ui";
 import { LangSwitch, useErr, useLocalized, useMoney, useSite, useT } from "@/components/I18n";
 import { ItemModal } from "@/components/store/Storefront";
 import { lineUnit, optionText, useCart, type StoreData, type StoreItem } from "@/components/store/shared";
-import { Stepper } from "@/components/ui";
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
@@ -45,6 +44,7 @@ export default function PosTerminal({ data, staffName }: { data: StoreData; staf
       setRecent(r.orders);
     } catch {}
   }, [truck.slug]);
+
   useEffect(() => {
     void loadRecent();
     const id = setInterval(loadRecent, 15000);
@@ -122,6 +122,9 @@ export default function PosTerminal({ data, staffName }: { data: StoreData; staf
           </div>
           <div className="text-xs text-muted">{staffName}</div>
         </div>
+        <a href={`/kitchen/${truck.slug}`} className="btn btn-sm btn-soft">
+          👨‍🍳 {L("Kitchen", "شاشة المطبخ")}
+        </a>
         <LangSwitch />
         <LogoutButton label={t("login.logout")} />
       </header>

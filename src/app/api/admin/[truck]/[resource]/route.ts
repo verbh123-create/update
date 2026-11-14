@@ -43,8 +43,7 @@ const CRUD = {
   regions: { table: regions, order: [regions.nameEn], fields: { nameEn: "s", nameAr: "s", fee: "n", active: "b" } },
   coupons: { table: coupons, order: [desc(coupons.id)], fields: { code: "s", type: "s", value: "n", minOrder: "n", startsOn: "ns", endsOn: "ns", maxUses: "nn", active: "b" } },
   banners: { table: banners, order: [desc(banners.id)], fields: { kind: "s", titleEn: "s", titleAr: "s", bodyEn: "s", bodyAr: "s", imageUrl: "s", startsOn: "ns", endsOn: "ns", active: "b" } },
-  drivers: { table: drivers, order: [drivers.id], fields: { name: "s", phone: "s", defaultCommission: "n", active: "b" } },
-} as unknown as Record<string, { table: typeof items; order: never[]; fields: Record<string, FT> }>;
+drivers: { table: drivers, order: [drivers.id], fields: { name: "s", phone: "s", defaultCommission: "n", commissionType: "s", active: "b" } },} as unknown as Record<string, { table: typeof items; order: never[]; fields: Record<string, FT> }>;
 
 function coerce(t: FT, v: unknown): unknown {
   switch (t) {
@@ -152,6 +151,36 @@ async function handle(method: Method, req: Request, ctx: Ctx): Promise<Response>
           await cancelOrder(o, t);
           return ok();
         }
+
+        if (body.action === "update_items") {
+          if (o.status === "CANCELLED" || o.status === "COMPLETED") throw new ApiError("invalid_input");
+          const newItems = (Array.isArray(body.items) ? body.items : []).map((x: any) => ({
+            itemId: num(x.itemId),
+            nameEn: str(x.nameEn, 120),
+            nameAr: str(x.nameAr, 120),
+            unitPrice: Math.max(0, num(x.unitPrice)),
+            qty: Math.max(1, Math.floor(num(x.qty, 1))),
+            ingredients: Array.isArray(x.ingredients) ? x.ingredients : [],
+          }));
+          if (!newItems.length) throw new ApiError("invalid_input");
+
+          const subtotal = newItems.reduce((acc: number, item: { unitPrice: number; qty: number }) => acc + item.unitPrice * item.qty, 0);
+          const couponDisc = num(o.couponDiscount);
+          const loyaltyDisc = num(o.loyaltyDiscount);
+          const subDisc = num(o.subscriptionDiscount);
+          const deliveryFee = num(o.deliveryFee);
+          const total = Math.max(0, subtotal - couponDisc - loyaltyDisc - subDisc + deliveryFee);
+
+          await db.update(orders).set({
+            items: newItems,
+            subtotal,
+            total,
+          }).where(eq(orders.id, o.id));
+
+          const [fresh] = await db.select().from(orders).where(eq(orders.id, o.id)).limit(1);
+          return ok({ order: (await hydrateOrders([fresh], settings))[0] });
+        }
+
         const patch: Partial<typeof orders.$inferInsert> = {};
         if ("driverId" in body) {
           if (o.driverPaid) throw new ApiError("invalid_input");

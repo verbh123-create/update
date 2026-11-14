@@ -44,6 +44,8 @@ export interface OrderView {
   customerPhone: string | null;
   fulfillment: Fulfillment;
   address: string;
+  lat?: number | null;
+  lng?: number | null;
   regionName: string;
   deliveryFee: number;
   deliverySlot: string;

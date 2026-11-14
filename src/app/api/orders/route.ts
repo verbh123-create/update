@@ -5,7 +5,7 @@ import { getCustomer } from "@/lib/server/auth";
 import { getSettings, getTruck } from "@/lib/server/config";
 import { createCharge, gatewayReady } from "@/lib/server/gateway";
 import { ApiError, getOrigin, num, ok, readBody, route, str } from "@/lib/server/http";
-import { cancelOrder, createOrder, hydrateOrders, openState, priceCart, resolveSlot, slotLabel } from "@/lib/server/logic";
+import { cancelOrder, createOrder, hydrateOrders, openState, priceCart } from "@/lib/server/logic";
 import { bhParts } from "@/lib/time";
 import type { CartInput, Fulfillment, PayMethod } from "@/lib/types";
 
@@ -36,11 +36,14 @@ export const POST = route(async (req: Request) => {
 
   const regionId = num(b.regionId) || null;
   const address = str(b.address, 300);
-  let slotText = "";
+  const lat = num(b.lat) || null;
+  const lng = num(b.lng) || null;
+  const slotText = "";
   if (!dry) {
-    if (fulfillment === "delivery" && address.length < 3) throw new ApiError("address_required");
-    const slot = resolveSlot(t, str(b.slotId, 20) || undefined, { required: fulfillment === "delivery", today: true });
-    slotText = slotLabel(slot);
+    if (fulfillment === "delivery") {
+      if (address.length < 3) throw new ApiError("address_required");
+      if (!lat || !lng) throw new ApiError("location_required");
+    }
   }
 
   const priced = await priceCart({
@@ -86,6 +89,8 @@ export const POST = route(async (req: Request) => {
     guest,
     fulfillment,
     address: fulfillment === "delivery" ? address : "",
+    lat: fulfillment === "delivery" ? lat : null,
+    lng: fulfillment === "delivery" ? lng : null,
     priced,
     slotLabel: slotText,
     paymentMethod: method,

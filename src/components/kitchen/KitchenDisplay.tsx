@@ -9,6 +9,12 @@ import { LangSwitch, useErr, useLocalized, useSite, useT } from "@/components/I1
 
 const HOUR = 3600_000;
 
+interface Driver {
+  id: number;
+  name: string;
+  phone?: string;
+}
+
 export default function KitchenDisplay({ slug, nameEn, nameAr }: { slug: string; nameEn: string; nameAr: string }) {
   const t = useT();
   const err = useErr();
@@ -22,7 +28,14 @@ export default function KitchenDisplay({ slug, nameEn, nameAr }: { slug: string;
   const [skew, setSkew] = useState(0);
   const [now, setNow] = useState(() => Date.now());
   const [flash, setFlash] = useState<Record<number, number>>({});
-  const lastBucket = useRef<Map<number, number>>(new Map());
+  
+  // حالات إدارة السائقين لطلبات التوصيل وتفاصيل الطلب والتعديل
+  const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [targetOrder, setTargetOrder] = useState<OrderView | null>(null);
+  const [selectedDriverId, setSelectedDriverId] = useState<string>("");
+  const [detailOrder, setDetailOrder] = useState<OrderView | null>(null);
+  const [isEditingItems, setIsEditingItems] = useState(false);
+  const [editableItems, setEditableItems] = useState<any[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -33,11 +46,20 @@ export default function KitchenDisplay({ slug, nameEn, nameAr }: { slug: string;
     } catch {}
   }, [slug, showDone]);
 
+  // جلب قائمة السائقين الخاصين بهذه العربة فقط
+  const loadDrivers = useCallback(async () => {
+    try {
+      const r = await api<{ drivers: Driver[] }>(`/api/kitchen/${slug}/drivers`);
+      setDrivers(r.drivers ?? []);
+    } catch {}
+  }, [slug]);
+
   useEffect(() => {
     void load();
+    void loadDrivers();
     const id = setInterval(load, 4000);
     return () => clearInterval(id);
-  }, [load]);
+  }, [load, loadDrivers]);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
@@ -45,34 +67,43 @@ export default function KitchenDisplay({ slug, nameEn, nameAr }: { slug: string;
   }, []);
 
   const serverNow = now + skew;
-  const alertStart = (o: OrderView) => (o.kind === "subscription" && o.scheduledFor ? new Date(o.scheduledFor).getTime() - HOUR : new Date(o.createdAt).getTime());
-  const intervalMs = (o: OrderView) => (o.kind === "subscription" ? settings.subAlertMin : settings.directAlertMin) * 60_000;
 
-  // Alert engine: direct orders ring every N minutes from creation; subscriptions every M minutes starting 1h before delivery.
+  // Alert engine: rings continuously every 5 seconds for any pending unaccepted order
   useEffect(() => {
-    let ring = false;
-    const flashes: Record<number, number> = {};
-    for (const o of orders) {
-      const start = alertStart(o);
-      if (serverNow < start) continue;
-      const bucket = Math.floor((serverNow - start) / intervalMs(o));
-      if (lastBucket.current.get(o.id) !== bucket) {
-        lastBucket.current.set(o.id, bucket);
-        flashes[o.id] = Date.now() + 9000;
-        ring = true;
-      }
-    }
-    if (ring) {
-      if (sound) beep(3);
-      setFlash((f) => ({ ...f, ...flashes }));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverNow, orders, sound]);
+    if (!sound || orders.length === 0) return;
 
-  const complete = async (o: OrderView) => {
-    setOrders((cur) => cur.filter((x) => x.id !== o.id));
+    beep(3);
+    const interval = setInterval(() => {
+      if (orders.length > 0) {
+        beep(3);
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [sound, orders.length]);
+
+  // عند الضغط على زر "تم التجهيز"
+  const handleCompleteClick = (o: OrderView) => {
+    if (o.fulfillment === "delivery") {
+      // إذا كان الطلب توصيل، نفتح نافذة اختيار السائق أولاً
+      setTargetOrder(o);
+      setSelectedDriverId(drivers[0] ? String(drivers[0].id) : "");
+    } else {
+      // استلام من العربة أو محلي يتم إنجازه مباشرة
+      void executeComplete(o.id);
+    }
+  };
+
+  const executeComplete = async (orderId: number, driverId?: number) => {
+    setOrders((cur) => cur.filter((x) => x.id !== orderId));
+    setTargetOrder(null);
     try {
-      await api(`/api/kitchen/${slug}/orders`, { body: { orderId: o.id } });
+      await api(`/api/kitchen/${slug}/orders`, { 
+        body: { 
+          orderId, 
+          driverId: driverId ? Number(driverId) : undefined 
+        } 
+      });
     } catch (e) {
       toast(err((e as { code?: string }).code), "err");
     }
@@ -94,7 +125,6 @@ export default function KitchenDisplay({ slug, nameEn, nameAr }: { slug: string;
 
   const renderCard = (o: OrderView, finished?: boolean) => {
     const alerting = !finished && (flash[o.id] ?? 0) > now;
-    const start = alertStart(o);
     const waiting = Math.max(0, Math.floor((serverNow - new Date(o.createdAt).getTime()) / 60000));
     return (
       <article key={o.id} className={`card flex flex-col gap-2 p-4 ${alerting ? "alerting" : ""} ${finished ? "opacity-60" : ""}`} style={{ borderWidth: 2 }}>
@@ -112,7 +142,6 @@ export default function KitchenDisplay({ slug, nameEn, nameAr }: { slug: string;
         {o.kind === "subscription" && o.scheduledFor ? (
           <div className="rounded-lg bg-accent/15 px-3 py-1.5 text-sm font-bold text-accent">
             📅 {t("kds.deliverAt", { when: fmtDateTime(o.scheduledFor, lang) })}
-            {serverNow < start && <span className="block text-xs font-semibold text-muted">⏰ {t("kds.alertStarts", { when: fmtDateTime(new Date(start).toISOString(), lang) })}</span>}
           </div>
         ) : (
           <div className="text-xs text-muted">{t("kds.ago", { n: waiting })}</div>
@@ -125,30 +154,31 @@ export default function KitchenDisplay({ slug, nameEn, nameAr }: { slug: string;
                 <span className="text-accent">{l.qty}×</span>
                 <span>{L(l.nameEn, l.nameAr)}</span>
               </div>
-              {(l.removedNames.length > 0 || l.extraNames.length > 0) && (
-                <div className="ms-8 text-sm font-semibold">
-                  {l.removedNames.map((r, k) => (
-                    <span key={`r${k}`} className="me-2 text-bad">
-                      − {L(r.en, r.ar)}
-                    </span>
-                  ))}
-                  {l.extraNames.map((r, k) => (
-                    <span key={`e${k}`} className="me-2 text-good">
-                      + {L(r.en, r.ar)}
-                    </span>
-                  ))}
-                </div>
-              )}
             </li>
           ))}
         </ul>
         {o.notes && <p className="rounded-lg bg-black/30 px-3 py-1.5 text-sm">📝 {o.notes}</p>}
-        <div className="text-xs text-muted">
-          {o.customerName ?? ""} {o.customerPhone ? `· ${o.customerPhone}` : ""}
-          {o.fulfillment === "delivery" && o.address ? ` · ${o.regionName} · ${o.address}` : ""}
+        
+        <div className="flex items-center justify-between pt-1">
+          <div className="text-xs text-muted truncate max-w-[200px]">
+            {o.customerName ?? ""} {o.customerPhone ? `· ${o.customerPhone}` : ""}
+            {o.fulfillment === "delivery" && o.address ? ` · ${o.regionName} · ${o.address}` : ""}
+          </div>
+          <button 
+            type="button" 
+            className="btn btn-xs btn-soft shrink-0" 
+            onClick={() => {
+              setDetailOrder(o);
+              setIsEditingItems(false);
+              setEditableItems([]);
+            }}
+          >
+            🗺️ التفاصيل والخريطة
+          </button>
         </div>
+
         {!finished && (
-          <button className="btn btn-primary mt-1 py-3 text-base" onClick={() => complete(o)}>
+          <button className="btn btn-primary mt-1 py-3 text-base" onClick={() => handleCompleteClick(o)}>
             ✅ {t("kds.complete")}
           </button>
         )}
@@ -176,6 +206,9 @@ export default function KitchenDisplay({ slug, nameEn, nameAr }: { slug: string;
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <a href={`/pos/${slug}`} className="btn btn-sm btn-soft">
+            🖥️ {L("POS", "الكاشير (POS)")}
+          </a>
           <button className={`btn btn-sm ${view === "all" ? "btn-primary" : "btn-ghost"}`} onClick={() => setView("all")}>
             {t("kds.viewAll")}
           </button>
@@ -192,6 +225,231 @@ export default function KitchenDisplay({ slug, nameEn, nameAr }: { slug: string;
           <LogoutButton label={t("login.logout")} />
         </div>
       </header>
+
+      {/* نافذة اختيار السائق لطلبات التوصيل */}
+      {targetOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div className="card w-full max-w-md p-6 bg-bg border-line shadow-2xl">
+            <h3 className="text-lg font-black mb-3">🛵 تعيين سائق التوصيل للطلب #{targetOrder.orderNo}</h3>
+            <p className="text-sm text-muted mb-4">الرجاء اختيار السائق المسؤول عن توصيل هذا الطلب:</p>
+            
+            <select 
+              className="input w-full mb-5 text-base" 
+              value={selectedDriverId} 
+              onChange={(e) => setSelectedDriverId(e.target.value)}
+            >
+              <option value="">اختر السائق...</option>
+              {drivers.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name} {d.phone ? `(${d.phone})` : ""}
+                </option>
+              ))}
+            </select>
+
+            <div className="flex gap-2 justify-end">
+              <button className="btn btn-ghost" onClick={() => setTargetOrder(null)}>
+                إلغاء
+              </button>
+              <button 
+                className="btn btn-primary" 
+                disabled={!selectedDriverId}
+                onClick={() => executeComplete(targetOrder.id, Number(selectedDriverId))}
+              >
+                تأكيد التجهيز وإرسال للسائق
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* نافذة تفاصيل الطلب والخريطة التفاعلية وتعديل الأصناف والإلغاء */}
+      {detailOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm overflow-y-auto">
+          <div className="card w-full max-w-lg p-6 bg-bg border-line shadow-2xl max-h-[90vh] overflow-y-auto space-y-4">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <h3 className="text-xl font-black">📋 تفاصيل الطلب #{detailOrder.orderNo}</h3>
+              <button className="btn btn-sm btn-ghost" onClick={() => setDetailOrder(null)}>✕</button>
+            </div>
+
+            <div className="space-y-1 text-sm bg-surface-2 p-3 rounded-xl">
+              <p><b>👤 العميل:</b> {detailOrder.customerName || "زائر"}</p>
+              <p><b>📞 الهاتف:</b> {detailOrder.customerPhone || "غير متوفر"}</p>
+              <p><b>🚚 نوع الطلب:</b> {t(`kds.fulfillment.${detailOrder.fulfillment}`)}</p>
+              <p><b>📍 العنوان:</b> {detailOrder.address || "غير محدد"}</p>
+              <p><b>🏙️ المنطقة:</b> {detailOrder.regionName || "غير محددة"}</p>
+              <p><b>💰 المجموع الكلي:</b> <span className="font-mono text-accent">{detailOrder.total} BHD</span></p>
+            </div>
+
+            {/* قائمة المنتجات مع إمكانية التعديل */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="font-bold text-sm text-muted">🛒 المنتجات المطلوبة:</h4>
+                {!isEditingItems ? (
+                  <button 
+                    type="button" 
+                    className="btn btn-xs btn-soft"
+                    onClick={() => {
+                      setEditableItems(JSON.parse(JSON.stringify(detailOrder.items)));
+                      setIsEditingItems(true);
+                    }}
+                  >
+                    ✏️ تعديل الأصناف
+                  </button>
+                ) : (
+                  <button 
+                    type="button" 
+                    className="btn btn-xs btn-ghost text-accent"
+                    onClick={() => setIsEditingItems(false)}
+                  >
+                    إلغاء التعديل
+                  </button>
+                )}
+              </div>
+
+              {!isEditingItems ? (
+                <ul className="space-y-2 border border-line rounded-xl p-3">
+                  {detailOrder.items.map((l, i) => (
+                    <li key={i} className="flex justify-between items-center text-sm font-bold">
+                      <span>{l.qty}× {L(l.nameEn, l.nameAr)}</span>
+                      <span className="font-mono text-accent">{l.unitPrice * l.qty} BHD</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="space-y-2 border border-line rounded-xl p-3 bg-surface-2">
+                  {editableItems.map((item, index) => (
+                    <div key={index} className="flex items-center justify-between gap-2 border-b border-line pb-2 last:border-b-0 last:pb-0">
+                      <span className="text-sm font-bold flex-1">{L(item.nameEn, item.nameAr)}</span>
+                      <div className="flex items-center gap-2">
+                        <button 
+                          type="button" 
+                          className="btn btn-xs btn-soft px-2"
+                          onClick={() => {
+                            if (item.qty > 1) {
+                              const updated = [...editableItems];
+                              updated[index].qty -= 1;
+                              setEditableItems(updated);
+                            }
+                          }}
+                        >
+                          -
+                        </button>
+                        <span className="font-mono text-sm font-bold">{item.qty}</span>
+                        <button 
+                          type="button" 
+                          className="btn btn-xs btn-soft px-2"
+                          onClick={() => {
+                            const updated = [...editableItems];
+                            updated[index].qty += 1;
+                            setEditableItems(updated);
+                          }}
+                        >
+                          +
+                        </button>
+                        <button 
+                          type="button" 
+                          className="btn btn-xs btn-ghost text-bad"
+                          onClick={() => {
+                            setEditableItems(editableItems.filter((_, i) => i !== index));
+                          }}
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm w-full mt-3"
+                    onClick={async () => {
+                      try {
+                        const res = await api<{ order: OrderView }>(`/api/admin/${slug}/orders`, {
+                          method: "PATCH",
+                          body: { id: detailOrder.id, action: "update_items", items: editableItems }
+                        });
+                        setDetailOrder(res.order);
+                        setIsEditingItems(false);
+                        toast("تم تحديث الطلب بنجاح", "good");
+                        void load();
+                      } catch (e: any) {
+                        toast(err(e.code), "err");
+                      }
+                    }}
+                  >
+                    حفظ التعديلات على الأصناف
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* خريطة جوجل التفاعلية لطلبات التوصيل */}
+            {detailOrder.fulfillment === "delivery" && (
+              <div className="space-y-2">
+                <h4 className="font-bold text-sm text-muted">📍 موقع العميل على الخريطة:</h4>
+                {detailOrder.lat && detailOrder.lng ? (
+                  <div className="space-y-2">
+                    <div className="overflow-hidden rounded-xl border border-line h-52 w-full bg-surface-2">
+                      <iframe
+                        width="100%"
+                        height="100%"
+                        style={{ border: 0 }}
+                        loading="lazy"
+                        allowFullScreen
+                        src={`https://maps.google.com/maps?q=${detailOrder.lat},${detailOrder.lng}&z=16&output=embed`}
+                      ></iframe>
+                    </div>
+                    <a
+                      href={`https://www.google.com/maps?q=${detailOrder.lat},${detailOrder.lng}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn btn-primary btn-sm w-full flex items-center justify-center gap-2"
+                    >
+                      🗺️ فتح التوجيه في تطبيق خرائط جوجل (Google Maps)
+                    </a>
+                  </div>
+                ) : (
+                  <p className="text-xs text-bad p-3 bg-bad/10 rounded-xl">⚠️ لم يتم تسجيل إحداثيات GPS لهذا الطلب من قبل العميل.</p>
+                )}
+              </div>
+            )}
+
+            {detailOrder.notes && (
+              <div className="text-sm bg-black/30 p-3 rounded-xl">
+                <b>📝 ملاحظات:</b> {detailOrder.notes}
+              </div>
+            )}
+
+            {/* الأزرار السفلية: إلغاء الطلب وإغلاق */}
+            <div className="flex items-center gap-2 pt-2 border-t border-line">
+              {detailOrder.status !== "CANCELLED" && (
+                <button 
+                  type="button" 
+                  className="btn btn-ghost text-bad hover:bg-bad/15 flex-1"
+                  onClick={async () => {
+                    if (!confirm("هل أنت متأكد من إلغاء هذا الطلب نهائياً؟")) return;
+                    try {
+                      await api(`/api/admin/${slug}/orders`, {
+                        method: "PATCH",
+                        body: { id: detailOrder.id, action: "cancel" }
+                      });
+                      setDetailOrder(null);
+                      toast("تم إلغاء الطلب بنجاح", "good");
+                      void load();
+                    } catch (e: any) {
+                      toast(err(e.code), "err");
+                    }
+                  }}
+                >
+                  ❌ إلغاء الطلب
+                </button>
+              )}
+              <button className="btn btn-ghost flex-1" onClick={() => setDetailOrder(null)}>
+                إغلاق
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {alertingCount > 0 && <div className="alerting bg-bad/15 px-4 py-2 text-center text-sm font-black text-bad">🚨 {alertingCount}</div>}
 

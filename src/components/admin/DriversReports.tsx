@@ -7,7 +7,7 @@ import type { OrderView } from "@/lib/types";
 import { Field, Modal, Toggle, toast } from "@/components/ui";
 import { adminErr, DateRange, Loading, Money, Panel, Stat, useRows } from "./shared";
 
-type Driver = { id?: number; name: string; phone: string; defaultCommission: number; active: boolean };
+type Driver = { id?: number; name: string; phone: string; defaultCommission: number; commissionType?: string; active: boolean };
 
 export function DriversTab({ slug }: { slug: string }) {
   const drivers = useRows<Driver & { id: number }>(`/api/admin/${slug}/drivers`);
@@ -47,7 +47,7 @@ export function DriversTab({ slug }: { slug: string }) {
       <Panel
         title="Drivers"
         actions={
-          <button className="btn btn-primary btn-sm" onClick={() => setEdit({ name: "", phone: "", defaultCommission: 0.5, active: true })}>
+          <button className="btn btn-primary btn-sm" onClick={() => setEdit({ name: "", phone: "", defaultCommission: 0.5, commissionType: "fixed", active: true })}>
             + Driver
           </button>
         }
@@ -69,7 +69,13 @@ export function DriversTab({ slug }: { slug: string }) {
                 <tr key={d.id}>
                   <td className="font-bold">{d.name}</td>
                   <td>{d.phone}</td>
-                  <td>{Money(d.defaultCommission)}</td>
+                  <td>
+                    {d.commissionType === "region" ? (
+                      <span className="chip chip-accent">Match Region Fee</span>
+                    ) : (
+                      Money(d.defaultCommission)
+                    )}
+                  </td>
                   <td>
                     <Toggle checked={d.active} onChange={(v) => drivers.save({ id: d.id, active: v })} />
                   </td>
@@ -191,8 +197,14 @@ export function DriversTab({ slug }: { slug: string }) {
             <Field label="Phone">
               <input className="input" value={edit.phone} onChange={(e) => setEdit({ ...edit, phone: e.target.value })} />
             </Field>
-            <Field label="Default commission per delivery (BHD)">
-              <input type="number" step="0.001" min="0" className="input" value={edit.defaultCommission} onChange={(e) => setEdit({ ...edit, defaultCommission: Number(e.target.value) })} />
+            <Field label="Commission calculation type">
+              <select className="input" value={edit.commissionType ?? "fixed"} onChange={(e) => setEdit({ ...edit, commissionType: e.target.value })}>
+                <option value="fixed">Fixed amount per order (مبلغ ثابت)</option>
+                <option value="region">Match region delivery fee (حسب رسوم التوصيل للمنطقة)</option>
+              </select>
+            </Field>
+            <Field label={edit.commissionType === "region" ? "Default commission (Overridden by region fee)" : "Default commission per delivery (BHD)"}>
+              <input type="number" step="0.001" min="0" className="input" value={edit.defaultCommission} disabled={edit.commissionType === "region"} onChange={(e) => setEdit({ ...edit, defaultCommission: Number(e.target.value) })} />
             </Field>
             <Toggle checked={edit.active} onChange={(v) => setEdit({ ...edit, active: v })} label="Active" />
             <button

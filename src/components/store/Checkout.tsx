@@ -43,6 +43,8 @@ export default function Checkout({
   const [addrMode, setAddrMode] = useState<"default" | "other">(hasDefault ? "default" : "other");
   const [regionId, setRegionId] = useState("");
   const [address, setAddress] = useState("");
+  const [lat, setLat] = useState<number | null>(null);
+  const [lng, setLng] = useState<number | null>(null);
   const [slotId, setSlotId] = useState("");
   const [method, setMethod] = useState<"cash" | "benefit" | "card">(truck.pay.cash ? "cash" : truck.pay.benefit ? "benefit" : "card");
   const [couponInput, setCouponInput] = useState("");
@@ -75,7 +77,7 @@ export default function Checkout({
     const h = setTimeout(async () => {
       try {
         const r = await api<{ pricing: Pricing }>("/api/orders", {
-          body: { truck: truck.slug, dryRun: true, cart: cartInput, fulfillment, regionId: Number(regionId) || null, coupon, useLoyalty: useLoyalty && credits > 0, asGuest },
+          body: { truck: truck.slug, dryRun: true, cart: cartInput, fulfillment, regionId: Number(regionId) || null, lat, lng, coupon, useLoyalty: useLoyalty && credits > 0, asGuest },
         });
         if (alive) {
           setQuote(r.pricing);
@@ -93,10 +95,11 @@ export default function Checkout({
       alive = false;
       clearTimeout(h);
     };
-  }, [cartInput, fulfillment, regionId, coupon, useLoyalty, credits, asGuest, truck.slug, err]);
+  }, [cartInput, fulfillment, regionId, lat, lng, coupon, useLoyalty, credits, asGuest, truck.slug, err]);
 
   const place = async () => {
     if (asGuest && (!guest.name.trim() || guest.phone.replace(/\D/g, "").length < 7)) return toast(err("contact_required"), "err");
+    if (fulfillment === "delivery" && (!lat || !lng)) return toast("Please select your delivery location on the map / GPS", "err");
     setBusy(true);
     try {
       const r = await api<{ order: OrderView; paymentUrl?: string }>("/api/orders", {
@@ -106,7 +109,9 @@ export default function Checkout({
           fulfillment,
           regionId: Number(regionId) || null,
           address,
-          slotId: slotId || undefined,
+          lat,
+          lng,
+          slotId: slotId || "ASAP",
           paymentMethod: method,
           coupon,
           useLoyalty: useLoyalty && credits > 0,
@@ -162,11 +167,10 @@ export default function Checkout({
             )}
           </div>
           {asGuest && (
-            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <input className="input" placeholder={t("common.name")} value={guest.name} onChange={(e) => setGuest({ ...guest, name: e.target.value })} />
               <input className="input" type="tel" placeholder={t("common.phone")} value={guest.phone} onChange={(e) => setGuest({ ...guest, phone: e.target.value })} />
-              <input className="input" type="email" placeholder={t("common.email")} value={guest.email} onChange={(e) => setGuest({ ...guest, email: e.target.value })} />
-              <p className="text-xs text-muted sm:col-span-3">{t("checkout.guestHint")}</p>
+              <p className="text-xs text-muted sm:col-span-2">{t("checkout.guestHint")}</p>
             </div>
           )}
         </section>
@@ -209,20 +213,48 @@ export default function Checkout({
                 ))}
               </select>
               <textarea className="input" rows={2} placeholder={t("common.address")} value={address} disabled={addrMode === "default" && hasDefault} onChange={(e) => setAddress(e.target.value)} />
+              
+              <div className="card-2 p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-bold">📍 Delivery Location (Required)</span>
+                  <button
+                    type="button"
+                    className="btn btn-soft btn-sm"
+                    onClick={() => {
+                      if (!navigator.geolocation) {
+                        toast("Geolocation is not supported by your browser", "err");
+                        return;
+                      }
+                      navigator.geolocation.getCurrentPosition(
+                        (pos) => {
+                          setLat(pos.coords.latitude);
+                          setLng(pos.coords.longitude);
+                          toast("Location pinned successfully! ✓");
+                        },
+                        (err) => {
+                          toast("Unable to retrieve your location. Please check browser permissions.", "err");
+                        },
+                        { enableHighAccuracy: true }
+                      );
+                    }}
+                  >
+                    🎯 Use GPS Location
+                  </button>
+                </div>
+                {lat && lng ? (
+                  <p className="text-xs text-good font-mono">
+                    ✓ Pinned: {lat.toFixed(5)}, {lng.toFixed(5)}
+                  </p>
+                ) : (
+                  <p className="text-xs text-bad">
+                    ⚠️ Map location selection is mandatory for delivery orders. Please click "Use GPS Location".
+                  </p>
+                )}
+              </div>
             </div>
           )}
 
-          <div className="mt-3">
-            <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-muted">{fulfillment === "delivery" ? t("checkout.slot") : t("checkout.pickupSlot")}</label>
-            <select className="input" value={slotId} onChange={(e) => setSlotId(e.target.value)}>
-              <option value="">{fulfillment === "delivery" ? `${t("common.select")}` : t("checkout.asap")}</option>
-              {slots.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.from} – {s.to}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Slots hidden for direct orders */}
         </section>
 
         {/* payment */}
