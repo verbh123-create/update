@@ -161,7 +161,12 @@ async function handle(method: Method, req: Request, ctx: Ctx): Promise<Response>
             unitPrice: Math.max(0, num(x.unitPrice)),
             qty: Math.max(1, Math.floor(num(x.qty, 1))),
             ingredients: Array.isArray(x.ingredients) ? x.ingredients : [],
-          }));
+            removed: Array.isArray(x.removed) ? x.removed : [],
+            extras: Array.isArray(x.extras) ? x.extras : [],
+            removedNames: Array.isArray(x.removedNames) ? x.removedNames : [],
+            extraNames: Array.isArray(x.extraNames) ? x.extraNames : [],
+            freeUnits: x.freeUnits === true,
+          })) as OrderLine[];
           if (!newItems.length) throw new ApiError("invalid_input");
 
           const subtotal = newItems.reduce((acc: number, item: { unitPrice: number; qty: number }) => acc + item.unitPrice * item.qty, 0);
