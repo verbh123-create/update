@@ -164,8 +164,8 @@ async function handle(method: Method, req: Request, ctx: Ctx): Promise<Response>
             extras: Array.isArray(x.extras) ? x.extras : [],
             removedNames: Array.isArray(x.removedNames) ? x.removedNames : [],
             extraNames: Array.isArray(x.extraNames) ? x.extraNames : [],
-            freeUnits: x.freeUnits === true,
-          })) as OrderLine[];
+            freeUnits: num(x.freeUnits),
+          })) as unknown as OrderLine[];
           if (!newItems.length) throw new ApiError("invalid_input");
 
           const subtotal = newItems.reduce((acc: number, item: { unitPrice: number; qty: number }) => acc + item.unitPrice * item.qty, 0);
