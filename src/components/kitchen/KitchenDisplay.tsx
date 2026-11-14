@@ -369,7 +369,7 @@ export default function KitchenDisplay({ slug, nameEn, nameAr }: { slug: string;
                         });
                         setDetailOrder(res.order);
                         setIsEditingItems(false);
-                        toast("تم تحديث الطلب بنجاح", "good");
+                        toast("تم تحديث الطلب بنجاح", "ok");
                         void load();
                       } catch (e: any) {
                         toast(err(e.code), "err");
@@ -433,7 +433,7 @@ export default function KitchenDisplay({ slug, nameEn, nameAr }: { slug: string;
                         body: { id: detailOrder.id, action: "cancel" }
                       });
                       setDetailOrder(null);
-                      toast("تم إلغاء الطلب بنجاح", "good");
+                      toast("تم إلغاء الطلب بنجاح", "ok");
                       void load();
                     } catch (e: any) {
                       toast(err(e.code), "err");
